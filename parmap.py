@@ -155,6 +155,10 @@ def parallel_apply(pfunc, tasks, timeout_sec, on_error):
 
 
 def warn_on_error(func, task, error):
+    # Ideally, this function would use the Python logging module
+    # but that module is confusing to beginners, so I fall back on 
+    # good old print statements instead
     msg = "WARN: Function %s on task %s failed with error: '%s'"
     msg = msg % (func.__name__, str(task), repr(error))
+    print(msg)
 
