@@ -3,7 +3,7 @@ Parallel Map (A python replacement for Matlab's parfor)
 
 
 This is a python equivalent to Matlab's parfor function. Runs
-trivially parallisable problems in multipe parallel processes.
+trivially parallisable problems in multiple parallel processes.
 
 A problem is trivially parallisable is each iteration of the loop
 can be computed independently of every other iteration
