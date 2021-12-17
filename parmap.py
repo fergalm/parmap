@@ -1,17 +1,24 @@
 # -*- coding: utf-8 -*-
 
 """
+Created on Mon Aug  3 13:58:38 2020
+
+TODO
+x I need a timeout for each task
+x I need an error_handler to return None if a task fails
+x A progress bar
+o I need more control over maxtask, chunksize, etc.
 @author: fergal
 """
-
-
 
 import concurrent.futures
 import multiprocessing
 import functools
 import itertools
 import traceback
+import datetime
 import asyncio
+import shutil
 import sys
 
 
@@ -25,7 +32,8 @@ def parmap(func, *args, fargs=None,
                engine='multi',
                timeout_sec=1e6,
                n_simul=None,
-               on_error=default_error_response):
+               on_error=default_error_response,
+            ):
     """Apply map in parallel.
 
     This is a python equivalent to Matlab's parfor function. Runs
@@ -49,7 +57,7 @@ def parmap(func, *args, fargs=None,
             return np.sqrt(x**2 + y**2)
 
         #hypot is called on every combination of x[i] and x[j].
-        #result has one hundred elements
+        #result has twenty-five elements
         parmap(hypot, x, x)
         >>> [0, 1, 2, ... 7.071]
 
@@ -146,26 +154,39 @@ def parmap(func, *args, fargs=None,
         fargs = {}
 
     tasks = list(itertools.product(*args))
-    bfunc = BacktraceCatcher(func)
-    pfunc = functools.partial(bfunc, **fargs)
+    if engine != 'serial':
+        #Not needed for the serial engine
+        func = BacktraceCatcher(func)
+    pfunc = functools.partial(func, **fargs)
 
-    engine_dict = { 'multi':parallel_apply,
-                    'threads':thread_apply,
-                    'async':async_apply,
-                    'serial': linear_apply,
-                  }
-
+    engine_dict = load_engine_dict()
     try:
         engine = engine_dict[engine]
     except KeyError:
         raise KeyError("Unrecognised engine %s. Must be one of %s" %(engine, engine_dict.keys()))
 
-
     pfunc.__name__ = func.__name__
-    results = engine(pfunc, tasks, n_simul, timeout_sec, on_error)
+    reporter='bar'
+    reporter = get_reporter(reporter)  #Progress reporter
+    results = engine(pfunc, tasks, n_simul, timeout_sec, on_error, reporter)
     return results
 
+def get_reporter(request):
 
+    opts = dict(
+        silent=NullReporter(),
+        text=TextReporter(),
+        bar=ProgressBarReporter(),
+    )
+
+    if isinstance(request, str):
+        try:
+            return opts[request]
+        except KeyError:
+            return KeyError("Requested reporter must be one of %s" %(opts.keys()))
+
+    #Assume request is a Reporter like object
+    return request        
 class BacktraceCatcher():
     """Stuff the backtrace into the exception value
 
@@ -192,16 +213,26 @@ class BacktraceCatcher():
             raise exc
 
 
-def linear_apply(pfunc, tasks, n_simul, timout_sec, on_error):
+def load_engine_dict():
+    engine_dict = { 
+        'multi':parallel_apply,
+        'threads':thread_apply,
+        'async':async_apply,
+        'serial': linear_apply,
+    }
+    return engine_dict
+
+
+def linear_apply(pfunc, tasks, n_simul, timout_sec, on_error, reporter):
     """The simplest engine. Run tasks serially"""
     results = []
     for i, task in enumerate(tasks):
         results.append(pfunc(*task))
-        print("%i/%i tasks complete" %(i+1, len(tasks)))
+        reporter(i, len(tasks))
     return results
 
 
-def thread_apply(pfunc, tasks, n_thread, timeout_sec, on_error):
+def thread_apply(pfunc, tasks, n_thread, timeout_sec, on_error, reporter):
     """Run each task in a thread"""
     if n_thread is None:
         n_thread = 5
@@ -219,12 +250,12 @@ def thread_apply(pfunc, tasks, n_thread, timeout_sec, on_error):
                 warn_on_error(pfunc, tasks[i], exc)
                 r = on_error(pfunc, tasks[i], exc)
 
-            print("%i/%i tasks complete" %(i+1, len(future_list)))
+            reporter(i, len(future_list))
             results.append(r)
     return results
 
 
-def parallel_apply(pfunc, tasks, n_cpu, timeout_sec, on_error):
+def parallel_apply(pfunc, tasks, n_cpu, timeout_sec, on_error, reporter):
     """Run each task in a separate process"""
     if n_cpu is None:
         n_cpu = multiprocessing.cpu_count() - 1
@@ -242,15 +273,15 @@ def parallel_apply(pfunc, tasks, n_cpu, timeout_sec, on_error):
                 warn_on_error(pfunc, tasks[i], exc)
                 r = on_error(pfunc, tasks[i], exc)
 
-            print("%i/%i tasks complete" %(i+1, len(process_list)))
+            reporter(i, len(process_list))
             results.append(r)
     return results
 
 
-def async_apply(pfunc, tasks, n_simul, timeout_sec, on_error):
-    return asyncio.run(_async_for(pfunc, tasks, timeout_sec))
+def async_apply(pfunc, tasks, n_simul, timeout_sec, on_error, reporter):
+    return asyncio.run(_async_for(pfunc, tasks, timeout_sec, reporter))
 
-async def _async_for(pfunc, tasklist, timeout_sec):
+async def _async_for(pfunc, tasklist, timeout_sec, reporter):
     futurelist = []
     for task in tasklist:
         future = asyncio.create_task(pfunc(*task))
@@ -363,3 +394,63 @@ def test_async_fail():
 
     with pytest.raises(ZeroDivisionError):
         parmap(afailing_task, x, engine='async')
+
+
+class NullReporter():
+    """Don't report anything on iteration"""
+    def __call__(self, itr, num):
+        pass 
+
+
+class TextReporter():
+    def __init__(self):
+        self.start_time = datetime.datetime.now()
+
+    def __call__(self, itr, num):
+        now = datetime.datetime.now()
+        elapsed = now - self.start_time 
+        elapsed_sec = elapsed.total_seconds()
+        print("%i/%i tasks complete (%i sec elapsed)" %(itr+1, num, elapsed_sec))
+
+
+
+class ProgressBarReporter():
+    """A Tqdm-like progress bar.
+    
+    I tried using tqdm, but this usecase is just a bit
+    outside it's comfortzone
+    """
+    def __init__(self):
+        self.start_time = datetime.datetime.now()
+
+    def __call__(self, itr, num):
+        itr += 1
+
+        # bar = self.create_bar(itr, num)
+        elapsed = self.compute_elapsed(itr, num)
+        msg = "%i/%i %s " %(itr, num, elapsed)
+
+        bar = self.create_bar(itr, num, len(msg))
+        msg = bar + msg
+        print(msg)
+
+    def create_bar(self, itr, num, nchars):
+        width = shutil.get_terminal_size().columns - nchars - 10
+
+        frac = int(width * itr/num)
+        remain = width - frac
+        #Not sure which unicode character looks better
+        # bar = "[" + "█" * frac + "·" * remain + "] "
+        # bar = "[" + "■" * frac + "·" * remain + "] "
+        
+        bar = "[" + "▬" * (frac-1) + "▶" + "·" * remain + "] "
+        
+         	 
+        return bar
+    
+    def compute_elapsed(self, itr, num):
+        now = datetime.datetime.now()
+        elapsed = now - self.start_time 
+        elapsed_sec = elapsed.total_seconds()
+        return "(%i sec)" %(elapsed_sec)
+
