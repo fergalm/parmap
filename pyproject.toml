@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "python-parmap"
+version = "2.2.0"
+description = "Simple trivial parallelization"
+authors = ["Fergal <fergal.mullally@gmail.com>"]
+readme = "README.md"
+homepage = "https://github.com/fergalm/parmap"
+
+#This is only needed because the package name (python-parmap) doesn't
+#match the name of the module.
+#You pip install python-paramp, but import parmap.
+#If package name matches the module name this line is not necessary
+packages = [
+    { include="parmap", from="."}
+]
+
+[tool.poetry.dependencies]
+python = ">3.7"
+
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"

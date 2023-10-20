@@ -1,5 +1,5 @@
 # testing code
-from parmap import implentation
+from parmap import parmap
 import numpy as np
 import pytest
 import asyncio
