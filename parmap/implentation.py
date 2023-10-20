@@ -31,7 +31,7 @@ def parmap(
     fargs: dict = None,
     engine="multi",
     timeout_sec=1e6,
-    n_simul=None,
+    n_worker=None,
     on_error: Callable = default_error_response,
     reporter="bar",
 ) -> list:
@@ -175,7 +175,7 @@ def parmap(
 
     pfunc.__name__ = func.__name__
     reporter = get_reporter(reporter)  # Progress reporter
-    results = engine(pfunc, tasks, n_simul, timeout_sec, on_error, reporter)
+    results = engine(pfunc, tasks, n_worker, timeout_sec, on_error, reporter)
     return results
 
 
@@ -348,7 +348,7 @@ class ProgressBarReporter:
 
         bar = self.create_bar(itr, num, len(msg))
         msg = bar + msg
-        print(msg)
+        print(msg, end="")
 
     def create_bar(self, itr, num, nchars):
         width = shutil.get_terminal_size().columns - nchars - 10
